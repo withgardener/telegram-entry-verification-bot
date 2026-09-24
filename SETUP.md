@@ -186,15 +186,17 @@ The `api.example.com` server is needed when using static Pages. Keep the publish
 
 ## 9. First startup
 
-There are no database migrations or one-time database initialization. Compose starts the backend, then waits for `/health`; the frontend starts when the backend is healthy. Backend startup validates required configuration, connects to Telegram to validate the token/username, loads translations and begins long polling. Check:
+There are no database migrations or one-time database initialization. Compose starts the backend, then waits for its `/health`; the frontend starts when the backend is healthy. Backend startup validates required configuration, connects to Telegram to validate the token/username, loads translations and begins long polling. The backend health endpoint is `GET /health` (also accepts `HEAD`), returns a `2xx` response and process uptime, and does not expose credentials. On Render, set the Web Service **Health Check Path** to `/health` so Render checks the backend service. Check it directly at the backend host, not at the Cloudflare Pages frontend:
 
 ```bash
 docker compose ps
-curl -fsS https://verify.example.com/health
+curl -fsS http://127.0.0.1:3001/health
+# Or, when the backend has its own HTTPS API hostname:
+curl -fsS https://api.example.com/health
 docker compose logs --tail=100 backend
 ```
 
-The health response reports process availability, not Telegram credential validity after startup.
+For Docker deployments, Compose probes the backend internally. For static Cloudflare Pages, monitor the public backend API hostname (for example, `https://api.example.com/health`); the frontend’s `/health` file only reports that the static site is being served. The backend health response reports process availability, not Telegram API reachability after startup.
 
 ## 10. Verification test
 
@@ -229,7 +231,7 @@ There is no database to back up. Store an encrypted backup of `.env` and your pr
 | Bot does not receive a join request | Confirm join requests are enabled, bot is an administrator, and the Telegram token is the one for this bot. Inspect backend logs without sharing credentials. |
 | Bot cannot approve users | Grant invite-user / manage-join-requests permission (`can_invite_users`) and verify the bot is still an administrator. |
 | No private verification message | Check backend logs for `verification_request_delivery_failed`; the temporary private chat can only be used for a limited time. Ask the user to retry their request. |
-| Verification URL does not open | Check DNS, `PUBLIC_BASE_URL`, proxy upstream and `/health`; ensure the proxy serves the same public origin configured in `.env`. |
+| Verification URL does not open | Check DNS, `PUBLIC_BASE_URL`, proxy upstream and frontend availability. For static Pages, check the Pages domain separately from backend `https://api.example.com/health`. |
 | HTTPS or Telegram Web App error | Use a valid public HTTPS certificate. HTTP localhost is only suitable for local development, not Telegram production use. |
 | Invalid token | A restart, secret rotation, malformed query, altered URL or replay can invalidate a ticket. Ask the user to start a fresh join request. |
 | Expired verification | Tickets expire after `VERIFICATION_TTL` seconds. Retry with a new request; do not extend the URL lifetime in the browser. |

@@ -54,8 +54,8 @@ export function CaptchaChallenge({ onVerify, onError }: CaptchaChallengeProps) {
   }, [fail, verify]);
 
   return (
-    <div className="relative flex min-h-[76px] items-center justify-center rounded-2xl border bg-background/70 p-4" aria-label="Human verification challenge">
-      {loading && <span className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" aria-hidden="true" />Loading secure check…</span>}
+    <div className="relative flex min-h-[76px] items-center justify-center overflow-hidden rounded-xl border border-border bg-background p-2.5" aria-label="Human verification challenge">
+      {loading && <span className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" />Loading secure check…</span>}
       <div ref={container} className="absolute inset-0 flex items-center justify-center" />
     </div>
   );

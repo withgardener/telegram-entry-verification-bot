@@ -155,7 +155,14 @@ export function createHttpApp(deps: HttpDependencies): Koa {
 
   router.get("/health", (ctx) => {
     ctx.status = 200;
-    ctx.body = { status: "ok", service: "telegram-entry-verification-backend" };
+    ctx.body = {
+      status: "ok",
+      service: "telegram-entry-verification-backend",
+      uptime_seconds: Math.floor(process.uptime())
+    };
+  });
+  router.head("/health", (ctx) => {
+    ctx.status = 200;
   });
   router.get("/endpoints", (ctx) => {
     ctx.body = { status: "ok" };

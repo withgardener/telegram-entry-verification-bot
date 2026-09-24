@@ -4,6 +4,7 @@ const nextConfig: NextConfig = {
   output: process.env.CLOUDFLARE_STATIC_EXPORT === "1" ? "export" : "standalone",
   poweredByHeader: false,
   reactStrictMode: true,
+  agentRules: false,
   ...(process.env.CLOUDFLARE_STATIC_EXPORT === "1" ? {} : {
     async headers() {
       return [{

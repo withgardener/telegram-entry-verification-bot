@@ -13,12 +13,12 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: [{ media: "(prefers-color-scheme: light)", color: "#f4f8fc" }, { media: "(prefers-color-scheme: dark)", color: "#0b1220" }]
+  themeColor: [{ media: "(prefers-color-scheme: light)", color: "#f2f7fa" }, { media: "(prefers-color-scheme: dark)", color: "#111b24" }]
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body>
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
         {children}

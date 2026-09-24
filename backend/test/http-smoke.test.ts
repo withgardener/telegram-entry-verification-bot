@@ -53,7 +53,13 @@ test("backend health and verification API smoke flow", async () => {
   try {
     const health = await fetch(`${base}/health`);
     assert.equal(health.status, 200);
-    assert.equal((await health.json() as { status: string }).status, "ok");
+    const healthBody = await health.json() as { status: string; service: string; uptime_seconds: number };
+    assert.equal(healthBody.status, "ok");
+    assert.equal(healthBody.service, "telegram-entry-verification-backend");
+    assert.ok(Number.isInteger(healthBody.uptime_seconds) && healthBody.uptime_seconds >= 0);
+    const headHealth = await fetch(`${base}/health`, { method: "HEAD" });
+    assert.equal(headHealth.status, 200);
+    assert.equal(await headHealth.text(), "");
 
     const preflight = await fetch(`${base}/endpoints/verify-captcha`, {
       method: "OPTIONS",
