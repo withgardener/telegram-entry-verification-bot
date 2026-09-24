@@ -1,42 +1,28 @@
-# Contributing Guidelines
+# Contributing
 
-We appreciate everyone joining to contribute to this project. However, everyone doesn’t want to see the code being tons of Dark Matter.
+Thanks for helping improve Telegram Entry Verification Bot. Keep changes focused, preserve the Telegram join-request flow, and avoid adding infrastructure or runtime dependencies without a clear need.
 
-Some guidelines help us maintain the project more efficiently. We hope you can read them first and can rule your contribution with these guidelines.
+## Development
 
-## Code of Conduct
-### Respect others’ work
-We hope everyone has opportunities to contribute their code to Telegram Watchdog. We think that keeping others’ code is the fundamental rule of collaboration, which also benefits managing the code.
+- Use Node.js 24 LTS and npm.
+- Backend and frontend are independent packages; install and run checks from their respective directories.
+- Backend local startup requires a bot token, bot username, HTTPS public origin (or localhost for development), a verification secret, and a Turnstile secret.
+- Backend tests mock Telegram and CAPTCHA. Do not use production credentials in tests.
+- Frontend tests and `npm run smoke` use local fixtures and need no external accounts.
 
-If a feature or code fragment has been accepted and works as expected, we do not suggest you modify it enormously or eradicate it (however, you can try to improve it, and we are welcome). We believe that this rule is the fundamental respect for others’ work.
+Before opening a pull request, run:
 
-### Mind the gap between different branches
-Telegram Watchdog can be self-deployed, and people usually use the `main` branch to deploy their Telegram Watchdog instance. So, we need to make sure that the `main` branch is the release with fully functional.
+```text
+backend:  npm ci, npm run lint, npm run typecheck, npm test, npm run build
+frontend: npm ci, npm run lint, npm run typecheck, npm test, npm run build, npm run smoke
+```
 
-If you want to modify the code and merge your work to the primary repository of Telegram Watchdog, please submit your code to the `dev` branch. If you submit your pull requests to the `main` branch of the primary repository, the project manager may modify your pull requests and redirect them to the correct branch or will reject your pull requests directly.
+The CI workflow runs the same checks for pull requests and pushes to `main`. Do not commit `.env` files, tokens, login payloads, build output or `node_modules`.
 
-We will talk about the suggested way to prepare to modify the code later.
+## Changes to Telegram behavior
 
-### Localization contribution in Crowdin
-We put the localization management work into a spread project in Crowdin to simplify our work to manage localization files. So, we don’t accept the localization pull requests in the code layer, except the problems can only be resolved in the code.
+Include tests for token validation, expiry, replay, retries, or state changes when altering the verification flow. Keep the backend as an independent long-running service. Avoid logging Telegram credentials, full verification URLs, user login payloads, or CAPTCHA tokens.
 
-If you want to improve existing translations, you can head to our [Crowdin project](https://crowdin.com/project/telegram-watchdog). Or join our [official community](https://t.me/tgwatchdog_chat) if you want to suggest a new language.
+## Localization
 
-### Improve this!
-Don’t be afraid of such an extended code of conduct part. Just modify it when you see something that can be improved or has an error! We believe that it can improve not only the Telegram Watchdog but also yourself.
-
-## Guides of Modification
-### Code modifications
-To make sure you can adapt your code to the `dev` branch of the primary repository, we suggest you:
-
-- Keep all branches when you fork the primary repository by de-select the “Copy the main branch only” option
-- `checkout` to the `dev` branch after you clone your forked repository.
-- Do your work, and submit your pull requests to the `dev` branch of the primary repository after you complete your work.
-
-### Language modifications
-We trusteeship our localization work on Crowdin now, so you can head to our [Crowdin project](https://crowdin.com/project/telegram-watchdog) to submit your improvement suggestion. You can check out the documents of Crowdin if you have problems using Crowdin.
-
-Or, join our [official community](https://t.me/tgwatchdog_chat) if you want to suggest a new language.
-
-## Other Contributing Ways
-We are pleased that you want to contribute to Telegram Watchdog. Also, you can [sponsor us](https://github.com/sponsors/Astrian) to help Telegram Watchdog keep accessible without cost to everyone.
+Bot translations are stored under `backend/locales`. Preserve the locale license and contributor notices when editing these files.
