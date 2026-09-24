@@ -1,0 +1,3 @@
+files:
+  - source: /en/messages.ftl
+    translation: /%osx_locale%/messages.ftl
