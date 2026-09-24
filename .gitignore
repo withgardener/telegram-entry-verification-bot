@@ -3,3 +3,13 @@
 .DS_Store
 fnox.toml
 .DS_Store
+node_modules/
+.next/
+out/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+*.log
