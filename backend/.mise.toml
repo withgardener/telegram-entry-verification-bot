@@ -2,10 +2,9 @@
 # Inherits from root .mise.toml and adds backend-specific settings
 
 [tools]
-node = "22.22.0"
+node = "24.21.0"
 fnox = "latest"
 
 [env]
 # Backend development settings
-DEBUG = "tgwd:*"
 NODE_ENV = "development"

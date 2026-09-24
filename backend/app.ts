@@ -1,298 +1,174 @@
-/// <reference path = "types.d.ts" />
-import Dotenv from "dotenv"
-import { Bot, Context } from "grammy"
-import { Fluent } from "@moebius/fluent"
-import { FluentContextFlavor, useFluent } from "@grammyjs/fluent"
-import Debug from "debug"
-import Koa from "koa"
-import Router from "koa-router"
-import KoaBody from "koa-body"
-import func from "./func"
-import cors from "@koa/cors"
+import { resolve } from "node:path";
+import { Bot, Context } from "grammy";
+import { Fluent } from "@moebius/fluent";
+import { FluentContextFlavor, useFluent } from "@grammyjs/fluent";
+import { loadConfig } from "./src/config.js";
+import { createHttpApp } from "./src/http.js";
+import { TelegramServiceError, withTelegramRetry } from "./src/telegram-api.js";
+import { VerificationStore } from "./src/verification.js";
 
+type BotContext = Context & FluentContextFlavor;
 
-// Initialing
-const print = Debug("tgwd:app.ts")
+const config = loadConfig();
+const store = new VerificationStore(config.verificationSecret, config.verificationTtlSeconds);
+const bot = new Bot<BotContext>(config.botToken);
+const fluent = new Fluent();
+const openingRequests = new Set<string>();
 
-const fluent = new Fluent()
-Dotenv.config()
-
-const initialLocales = async () =>{
-  await fluent.addTranslation({
-    locales: "zh_Hans",
-    filePath: ["./locales/zh-Hans/messages.ftl"]
-  })
-  await fluent.addTranslation({
-    locales: "en",
-    filePath: ["./locales/en/messages.ftl"],
-    isDefault: true
-  })
-  await fluent.addTranslation({
-    locales: "zh_Hant",
-    filePath: ["./locales/zh-Hant/messages.ftl"]
-  })
-  await fluent.addTranslation({
-    locales: "zh_Hant_HK",
-    filePath: ["./locales/zh_HK/messages.ftl"]
-  })
-  await fluent.addTranslation({
-    locales: "ja",
-    filePath: ["./locales/ja/messages.ftl"]
-  })
-  await fluent.addTranslation({
-    locales: "ru",
-    filePath: ["./locales/ru/messages.ftl"]
-  })
-  await fluent.addTranslation({
-    locales: "tr",
-    filePath: ["./locales/tr/messages.ftl"]
-  })
-}
-(async () => { await initialLocales() })()
-
-export type BotContext = ( & Context & FluentContextFlavor )
-
-if (!process.env.TGWD_TOKEN) {
-  throw(new Error("You must define TGWD_TOKEN (Telegram bot token) to use this bot."))
-}
-if (!process.env.TGWD_FRONTEND_DOMAIN) {
-  throw(new Error("You must define TGWD_FRONTEND_DOMAIN (Frontend verify domain) to use this bot."))
-}
-if (!process.env.TGWD_SECRET) {
-  throw(new Error("You must define TGWD_SECRET (signature secret) to use this bot."))
-}
-if (!process.env.TGWD_PORT) {
-  throw(new Error("You must define TGWD_PORT (endpoint port) to use this bot."))
-}
-if (!process.env.TGWD_CFTS_API_KEY) {
-  throw(new Error("You must define TGWD_CFTS_API_KEY (Cloudflare Turnstile API key) to use this bot."))
+function log(level: "info" | "warn" | "error", event: string): void {
+  console[level](JSON.stringify({ level, event }));
 }
 
-// Bot part
-const bot = new Bot<BotContext>(process.env.TGWD_TOKEN || "");
+function escapeHtml(input: string): string {
+  return input.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character);
+}
 
-(async () => { bot.use(useFluent({ fluent, defaultLocale: "en"})) })();
+function ticketUrl(ticket: ReturnType<VerificationStore["create"]>): URL {
+  const url = new URL("/", config.publicBaseUrl);
+  url.searchParams.set("chat_id", String(ticket.chatId));
+  url.searchParams.set("msg_id", String(ticket.messageId));
+  url.searchParams.set("user_id", String(ticket.userId));
+  url.searchParams.set("private_chat_id", String(ticket.privateChatId));
+  url.searchParams.set("timestamp", String(ticket.timestamp));
+  url.searchParams.set("nonce", ticket.nonce ?? "");
+  url.searchParams.set("signature", ticket.signature);
+  return url;
+}
 
-(async () => {
-  bot.command("start", async ctx => {
-  	// ignore non-direct-message senario
-    if (ctx.chat.type !== "private") return
+async function loadTranslations(): Promise<void> {
+  const localeRoot = resolve(process.cwd(), "locales");
+  await Promise.all([
+    fluent.addTranslation({ locales: "zh_Hans", filePath: [resolve(localeRoot, "zh-Hans/messages.ftl")] }),
+    fluent.addTranslation({ locales: "en", filePath: [resolve(localeRoot, "en/messages.ftl")], isDefault: true }),
+    fluent.addTranslation({ locales: "zh_Hant", filePath: [resolve(localeRoot, "zh-Hant/messages.ftl")] }),
+    fluent.addTranslation({ locales: "zh_Hant_HK", filePath: [resolve(localeRoot, "zh_HK/messages.ftl")] }),
+    fluent.addTranslation({ locales: "ja", filePath: [resolve(localeRoot, "ja/messages.ftl")] }),
+    fluent.addTranslation({ locales: "ru", filePath: [resolve(localeRoot, "ru/messages.ftl")] }),
+    fluent.addTranslation({ locales: "tr", filePath: [resolve(localeRoot, "tr/messages.ftl")] })
+  ]);
+}
+
+async function verifyBotMembership(chatId: number, userId: number): Promise<boolean> {
+  const member = await withTelegramRetry(() => bot.api.getChatMember(chatId, userId), "check approved member");
+  return member.status === "member" || member.status === "administrator" || member.status === "creator" ||
+    (member.status === "restricted" && member.is_member);
+}
+
+async function approveJoinRequest(chatId: number, userId: number): Promise<void> {
+  try {
+    await withTelegramRetry(() => bot.api.approveChatJoinRequest(chatId, userId), "approve join request");
+  } catch (error) {
+    try {
+      if (await verifyBotMembership(chatId, userId)) return;
+    } catch {
+      // The original result remains authoritative when membership cannot be checked.
+    }
+    if (error instanceof TelegramServiceError) throw error;
+    throw new TelegramServiceError(false, { cause: error });
+  }
+}
+
+async function main(): Promise<void> {
+  await loadTranslations();
+  bot.use(useFluent({ fluent, defaultLocale: "en" }));
+
+  bot.command("start", async (ctx) => {
+    if (ctx.chat.type !== "private") return;
     await ctx.reply(
       `${ctx.t("welcome_body")}\n${ctx.t("welcome_links_github")} · ${ctx.t("welcome_links_help")} · ${ctx.t("welcome_links_community")}`,
       {
         reply_markup: {
-          inline_keyboard: [[
-            {
-              text: ctx.t("welcome_setmeasadmin"),
-              url: `https://t.me/${ctx.me.username}?startgroup=start&admin=invite_users`
-            }
-          ]]
+          inline_keyboard: [[{
+            text: ctx.t("welcome_setmeasadmin"),
+            url: `https://t.me/${config.botUsername}?startgroup=start&admin=invite_users`
+          }]]
         },
         parse_mode: "HTML",
-        link_preview_options: {
-          is_disabled: true
-        }
+        link_preview_options: { is_disabled: true }
       }
-    )
-  })
-})();
+    );
+  });
 
-(async () => {
-  bot.on("chat_join_request", async ctx => {
-
-  	const msg = await bot.api.sendMessage(ctx.from.id, `${ctx.t("verify_message", {groupname: ctx.chat.title})}\n${ctx.t("verify_loading")}`)
-    const timestamp = Date.now()
-    const msgId = msg.message_id
-    const signature = await func.signature(msgId, ctx.chat.id, ctx.from.id, timestamp)
-    const url = `https://${process.env.TGWD_FRONTEND_DOMAIN}/?chat_id=${ctx.chat.id}&msg_id=${msgId}&user_id=${ctx.from.id}&timestamp=${timestamp}&signature=${signature}`
-
-    const text = `${ctx.t("verify_message", {groupname: ctx.chat.title})}\n${ctx.t("verify_info")}\n\n${ctx.t("helpbot")}`
-    print(text)
-
-    await bot.api.editMessageText(
-      ctx.from.id, msgId,
-      text,
-      {
+  bot.on("chat_join_request", async (ctx) => {
+    const chatId = ctx.chat.id;
+    const userId = ctx.from.id;
+    const candidateKey = `${chatId}:${userId}`;
+    if (store.hasActiveRequest(chatId, userId) || openingRequests.has(candidateKey)) return;
+    openingRequests.add(candidateKey);
+    try {
+      const privateChatId = ctx.chatJoinRequest.user_chat_id ?? userId;
+      const message = await withTelegramRetry(
+        () => bot.api.sendMessage(privateChatId, ctx.t("verify_loading")),
+        "send verification message"
+      );
+      const ticket = store.create(chatId, message.message_id, userId, Date.now(), message.chat.id);
+      const appUrl = ticketUrl(ticket);
+      const browserUrl = new URL(appUrl);
+      browserUrl.searchParams.set("fallback", "1");
+      const text = `${ctx.t("verify_message", { groupname: escapeHtml(ctx.chat.title ?? "the group") })}\n${ctx.t("verify_info")}\n\n${ctx.t("helpbot")}`;
+      await withTelegramRetry(() => bot.api.editMessageText(message.chat.id, message.message_id, text, {
         reply_markup: {
           inline_keyboard: [
-            [{
-              text: `⚡️ ${ctx.t("verify_btn")}`,
-              web_app: {
-                url: url
-              }
-            }], [{
-            	text: `🌍 ${ctx.t("verify_btn_browser")}`,
-             	url: `${url}&fallback=1`
-            }]
+            [{ text: `⚡ ${ctx.t("verify_btn")}`, web_app: { url: appUrl.toString() } }],
+            [{ text: `🌍 ${ctx.t("verify_btn_browser")}`, url: browserUrl.toString() }]
           ]
         },
         parse_mode: "HTML",
-        link_preview_options: {
-          is_disabled: true
-        }
-      }
-    )
-  })
-})();
-
-(async () => { bot.catch(async err => {
-  print("Error detected while running the bot!")
-  print(err)
-}) })();
-
-(async () => { await bot.command("language", async ctx => {
-  await ctx.reply(ctx.message?.from.language_code || "No language code detected")
-}) })();
-
-(async () => { await bot.start() })()
-
-// HTTP Requests
-const endpoint = new Koa()
-endpoint.use(KoaBody())
-endpoint.use(cors({
-  origin: `https://${process.env.TGWD_FRONTEND_DOMAIN ?? ""}`,
-}))
-
-const router = new Router()
-router.get('/endpoints', async ctx => {
-  print(await func.signature(44, -1001320638783, 54785179, 1656425097585))
-  ctx.response.body = JSON.stringify({
-    hello: "world"
-  })
-  print(process.env.TGWD_FRONTEND_DOMAIN)
-})
-router.post('/endpoints/verify-captcha', async ctx => {
-  try {
-    const body = <Query>ctx.request.body
-    print(body)
-    const user = <TGUser>(JSON.parse(body.tglogin.user))
-
-    // Verify signature
-    const calculatedHash = await func.signature(body.request_query.msg_id, body.request_query.chat_id, user.id, body.request_query.timestamp)
-    if (calculatedHash !== body.request_query.signature) {
-      ctx.response.status = 400
-      ctx.response.body = { message: "INVALID_REQUEST" }
-      return
+        link_preview_options: { is_disabled: true }
+      }), "update verification message");
+      log("info", "verification_request_created");
+    } catch {
+      log("warn", "verification_request_delivery_failed");
+    } finally {
+      openingRequests.delete(candidateKey);
     }
+  });
 
-    // Verify telegram login
-    const loginResult = await func.verifyLogin(body.tglogin, process.env.TGWD_TOKEN || "")
-    print(body.tglogin)
-    if (!loginResult) {
-      ctx.response.status = 401
-      ctx.response.body = { message: "TELEGRAM_ACCOUNT_INFO_ERROR" }
-      return
-    }
+  bot.catch(({ ctx }) => {
+    log("error", "telegram_update_failed");
+    void ctx;
+  });
 
-    // Verify valid time
-    if ((body.request_query.timestamp + 180000) < new Date().getTime()) {
-      ctx.response.status = 400
-      ctx.response.body = { message: "REQUEST_OVERTIMED" }
-      await bot.api.deleteMessage(user.id, body.request_query.msg_id)
-      await bot.api.declineChatJoinRequest(body.request_query.chat_id, user.id)
-      return
-    }
-
-    // Verify captcha challenge
-    const token = ctx.request.body.token
-    const captchaResult = await func.verifyCaptcha(token)
-    if (!captchaResult.success) {
-      ctx.response.status = captchaResult.error?.code || 400
-      ctx.response.body = { message: captchaResult.error?.alias || "CAPTCHA_NOT_PASSED" }
-      await bot.api.deleteMessage(user.id, body.request_query.msg_id)
-      await bot.api.declineChatJoinRequest(body.request_query.chat_id, user.id)
-      return
-    }
-
-    // Accept user's join request
-    await bot.api.approveChatJoinRequest(body.request_query.chat_id, user.id)
-
-    // Delete verify message
-    await bot.api.deleteMessage(user.id, body.request_query.msg_id)
-
-    ctx.response.status = 204
-  } catch (e) {
-    console.log(e)
-    // const err = JSON.parse(e.message)
-    ctx.response.status = 500
-    ctx.response.body = { message: "SERVER_UNAVAILABLE" }
+  await bot.init();
+  if (bot.botInfo.username?.toLowerCase() !== config.botUsername.toLowerCase()) {
+    throw new Error("TELEGRAM_BOT_USERNAME does not match the configured bot token");
   }
-})
 
-router.post('/endpoints/verify-captcha-fallback', async ctx => {
-  try {
-    const body = <FallbackQuery>ctx.request.body
-    print('[Fallback Mode]', body)
-    const user = body.tglogin
-
-    // 第 1 步: 验证 Telegram Login Widget hash
-    const loginValid = await func.verifyTelegramLogin(
-      body.tglogin,
-      process.env.TGWD_TOKEN || ""
-    )
-    if (!loginValid) {
-      ctx.response.status = 400
-      ctx.response.body = { message: "TELEGRAM_LOGIN_INVALID" }
-      return
+  const api = createHttpApp({
+    config,
+    store,
+    telegram: {
+      approve: approveJoinRequest,
+      decline: async (chatId, userId) => { await withTelegramRetry(() => bot.api.declineChatJoinRequest(chatId, userId), "decline join request"); },
+      deleteMessage: async (privateChatId, messageId) => { await withTelegramRetry(() => bot.api.deleteMessage(privateChatId, messageId), "delete verification message"); }
     }
+  });
+  const server = await new Promise<ReturnType<typeof api.listen>>((resolveServer, reject) => {
+    const listening = api.listen(config.port, "0.0.0.0", () => resolveServer(listening));
+    listening.once("error", reject);
+  });
+  log("info", "backend_http_ready");
 
-    // 第 2 步: user_id 一致性验证
-    if (`${user.id}` !== `${body.request_query.user_id}`) {
-      ctx.response.status = 400
-      ctx.response.body = { message: "USER_ID_MISMATCH" }
-      await bot.api.deleteMessage(body.request_query.user_id, body.request_query.msg_id)
-      await bot.api.declineChatJoinRequest(body.request_query.chat_id, body.request_query.user_id)
-      return
-    }
+  void bot.start({ allowed_updates: ["message", "chat_join_request"] }).catch(() => {
+    log("error", "telegram_polling_stopped");
+    server.close(() => { process.exitCode = 1; });
+  });
 
-    // 第 3 步: 验证签名
-    const calculatedHash = await func.signature(
-      body.request_query.msg_id,
-      body.request_query.chat_id,
-      body.request_query.user_id,
-      body.request_query.timestamp
-    )
-    if (calculatedHash !== body.request_query.signature) {
-      ctx.response.status = 400
-      ctx.response.body = { message: "INVALID_REQUEST" }
-      return
-    }
+  const shutdown = (): void => {
+    log("info", "backend_shutdown");
+    bot.stop();
+    server.close(() => process.exit(0));
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+}
 
-    // 第 4 步: 验证时间戳（3 分钟有效期）
-    if ((body.request_query.timestamp + 180000) < new Date().getTime()) {
-      ctx.response.status = 400
-      ctx.response.body = { message: "REQUEST_OVERTIMED" }
-      await bot.api.deleteMessage(user.id, body.request_query.msg_id)
-      await bot.api.declineChatJoinRequest(body.request_query.chat_id, user.id)
-      return
-    }
-
-    // 第 5 步: 验证 CAPTCHA
-    const token = ctx.request.body.token
-    const captchaResult = await func.verifyCaptcha(token)
-    if (!captchaResult.success) {
-      ctx.response.status = captchaResult.error?.code || 400
-      ctx.response.body = { message: captchaResult.error?.alias || "CAPTCHA_NOT_PASSED" }
-      await bot.api.deleteMessage(user.id, body.request_query.msg_id)
-      await bot.api.declineChatJoinRequest(body.request_query.chat_id, user.id)
-      return
-    }
-
-    // 第 6 步: 批准加入请求
-    await bot.api.approveChatJoinRequest(body.request_query.chat_id, user.id)
-
-    // 删除验证消息
-    await bot.api.deleteMessage(user.id, body.request_query.msg_id)
-
-    ctx.response.status = 204
-  } catch (e) {
-    console.log(e)
-    ctx.response.status = 500
-    ctx.response.body = { message: "SERVER_UNAVAILABLE" }
-  }
-})
-router.options('/endpoints/verify-captcha', async ctx => {
-  ctx.response.status = 204
-})
-endpoint.use(router.routes())
-endpoint.listen(process.env.TGWD_PORT)
+void main().catch((error: unknown) => {
+  const knownConfigurationError = error instanceof Error && /^(Missing required environment variable:|TELEGRAM_BOT_USERNAME|PUBLIC_BASE_URL|VERIFICATION_SECRET|VERIFICATION_TTL|PORT|NODE_ENV)/.test(error.message);
+  console.error(JSON.stringify({
+    level: "error",
+    event: "startup_failed",
+    message: knownConfigurationError ? (error as Error).message : "Could not contact Telegram or start the service; check the bot token, network, and bot username."
+  }));
+  process.exitCode = 1;
+});
