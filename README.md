@@ -10,7 +10,7 @@ This project continues the work of [zonefile/tg-watchdog](https://github.com/zon
 - Server-verified Telegram identity and Cloudflare Turnstile; signed, expiring, single-use verification tickets.
 - Automatic approval or rejection of join requests, with bounded retry for transient Telegram API failures.
 - Localized bot messages, a small mobile-first Next.js verification UI, and a separate long-running bot service.
-- Docker Compose deployment with health checks, plus bare-metal instructions.
+- Docker Compose deployment with health checks, plus a pure-static Cloudflare Pages frontend option.
 
 ## Screenshots
 
@@ -22,14 +22,14 @@ Screenshots of the modern verification page will be added here.
 flowchart LR
   Telegram[Telegram group and bot] -->|join request / private message| Backend[Bot backend: grammY + Koa]
   Backend -->|signed verification link| User[Telegram Web App or mobile browser]
-  User --> Frontend[Next.js verification UI]
-  Frontend -->|same-origin API proxy| Backend
+  User --> Frontend[Static Next.js verification UI]
+  Frontend -->|HTTPS API + exact-origin CORS| Backend
   Frontend -->|challenge| Turnstile[Cloudflare Turnstile]
   Backend -->|identity, ticket and CAPTCHA checks| Telegram
   Backend -->|approve or decline request| Telegram
 ```
 
-The bot backend remains a separate process because Telegram polling, update handling, retry policy and join-request actions have their own long-running lifecycle. The Next.js app serves the verification experience and proxies browser requests to the private backend service. No database is used: short-lived ticket state is held in backend memory, so run one backend replica and be aware that a restart invalidates in-flight links.
+The bot backend remains a separate process because Telegram polling, update handling, retry policy and join-request actions have their own long-running lifecycle. The Cloudflare Pages frontend is exported as plain HTML, CSS and JavaScript; it calls the separately hosted backend over HTTPS. This mode creates no Pages Functions. For an all-Docker deployment, Next.js can instead run as a small server and proxy requests to the private backend. No database is used: short-lived ticket state is held in backend memory, so run one backend replica and be aware that a restart invalidates in-flight links.
 
 ## Quick start
 
@@ -48,11 +48,11 @@ The bot backend remains a separate process because Telegram polling, update hand
    docker compose up -d --build
    ```
 
-The web app is available on port `3000` by default. Put it behind HTTPS before using it with Telegram. Do not publish the backend port to the Internet.
+The web app is available on port `3000` by default. Put it behind HTTPS before using it with Telegram. For Cloudflare Pages, follow the static frontend setup in [SETUP.md](SETUP.md#cloudflare-pages-static-frontend-no-functions); the backend still needs its own public HTTPS API origin.
 
 ## Configuration
 
-Compose reads the root `.env` file. Important settings are the Telegram bot token and username, `PUBLIC_BASE_URL`, a random `VERIFICATION_SECRET`, the Cloudflare Turnstile secret and public site keys, and the optional `FRONTEND_PORT`. There is no database URL because this application has no database. See [SETUP.md](SETUP.md#4-environment-variables) for every setting and security guidance.
+Compose reads the root `.env` file. Important settings are the Telegram bot token and username, `PUBLIC_BASE_URL`, a random `VERIFICATION_SECRET`, the Cloudflare Turnstile secret and public site keys, and the optional `FRONTEND_PORT`. Static Cloudflare hosting also needs `NEXT_PUBLIC_BACKEND_BASE_URL` in Pages and the frontend origin allowed by backend `CORS_ALLOWED_ORIGINS` (`PUBLIC_BASE_URL` is allowed automatically). There is no database URL because this application has no database. See [SETUP.md](SETUP.md#4-environment-variables) for every setting and security guidance.
 
 ## Development
 
@@ -75,10 +75,10 @@ npm run dev
 Available package scripts:
 
 ```text
-dev  lint  typecheck  test  build
+dev  lint  typecheck  test  build  build:server
 ```
 
-The frontend also provides `npm run smoke` after a production build. Backend tests use mocked Telegram and CAPTCHA adapters; they do not require a live bot. The GitHub Actions workflow runs install, lint, typecheck, tests and build for both packages.
+`npm run build` creates the pure-static Cloudflare Pages export in `frontend/out`; set `NEXT_PUBLIC_BACKEND_BASE_URL` to an HTTPS backend origin first. `npm run build:server` creates the standalone Next.js server used by Docker. Frontend smoke commands are `npm run smoke:pages` after a static build and `npm run smoke` after a server build. Backend tests use mocked Telegram and CAPTCHA adapters; they do not require a live bot. The GitHub Actions workflow runs install, lint, typecheck, tests and both frontend build modes.
 
 ## Updating
 
@@ -89,7 +89,7 @@ docker compose up -d
 docker compose logs -f
 ```
 
-There are currently no database migrations. Back up your deployment `.env` securely before upgrading; never add it to Git.
+There are currently no database migrations. Back up your deployment `.env` securely before upgrading; never add it to Git. For Cloudflare Pages, keep the root directory set to `frontend`, then use build command `npm run build` and output directory `out`; Pages deploys only static files and does not need Functions.
 
 ## Credits
 

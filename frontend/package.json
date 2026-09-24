@@ -9,11 +9,14 @@
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0",
     "start": "next start --hostname 0.0.0.0",
-    "build": "next build",
+    "build": "node scripts/build-pages.mjs",
+    "build:pages": "node scripts/build-pages.mjs",
+    "build:server": "next build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/lib/verification.test.ts",
-    "smoke": "node test/smoke.mjs"
+    "test": "tsx --test src/lib/verification.test.ts src/lib/verification-api.test.ts",
+    "smoke": "node test/smoke.mjs",
+    "smoke:pages": "node test/static-smoke.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "1.1.23",

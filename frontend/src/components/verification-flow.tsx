@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
+import { submitVerification } from "@/lib/verification-api";
 import { apiStateToViewState, readRequestQuery, type RequestQuery, type VerificationViewState } from "@/lib/verification";
 
 type TelegramIdentity = { mode: "webapp"; data: Record<string, string> } | { mode: "fallback"; data: TelegramLoginUser };
@@ -71,12 +72,7 @@ export function VerificationFlow({ query }: { query: Record<string, string> }) {
 
   const inspectTicket = useCallback(async (): Promise<{ response: Response; body: ApiResponse }> => {
     if (!requestQuery) throw new Error("INVALID_REQUEST");
-    const response = await fetch("/api/verify", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify({ kind: "status", request_query: requestQuery })
-    });
+    const response = await submitVerification({ kind: "status", request_query: requestQuery });
     return { response, body: readBody(await response.json().catch(() => ({}))) };
   }, [requestQuery]);
 
@@ -154,17 +150,12 @@ export function VerificationFlow({ query }: { query: Record<string, string> }) {
     if (!requestQuery || !identity) return;
     setState("loading");
     try {
-      const response = await fetch("/api/verify", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({
-          kind: "complete",
-          fallback: identity.mode === "fallback",
-          token: challengeToken,
-          tglogin: identity.data,
-          request_query: requestQuery
-        })
+      const response = await submitVerification({
+        kind: "complete",
+        fallback: identity.mode === "fallback",
+        token: challengeToken,
+        tglogin: identity.data,
+        request_query: requestQuery
       });
       const body = readBody(await response.json().catch(() => ({})));
       const next = apiStateToViewState(response.status, body.message, body.status);

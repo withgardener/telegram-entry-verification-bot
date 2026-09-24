@@ -17,6 +17,7 @@ test("backend health and verification API smoke flow", async () => {
     VERIFICATION_SECRET: secret,
     VERIFICATION_TTL: "180",
     TURNSTILE_SECRET_KEY: "test-only-turnstile-secret",
+    CORS_ALLOWED_ORIGINS: "https://preview.example.test",
     PORT: "3000",
     NODE_ENV: "test"
   });
@@ -53,6 +54,27 @@ test("backend health and verification API smoke flow", async () => {
     const health = await fetch(`${base}/health`);
     assert.equal(health.status, 200);
     assert.equal((await health.json() as { status: string }).status, "ok");
+
+    const preflight = await fetch(`${base}/endpoints/verify-captcha`, {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://preview.example.test",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type"
+      }
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get("access-control-allow-origin"), "https://preview.example.test");
+    assert.equal(preflight.headers.get("access-control-allow-methods"), "POST, OPTIONS");
+    assert.equal(preflight.headers.get("access-control-allow-credentials"), null);
+
+    const blockedOrigin = await fetch(`${base}/endpoints/verification/status`, {
+      method: "POST",
+      headers: { origin: "https://attacker.example", "content-type": "application/json" },
+      body: JSON.stringify({ request_query: {} })
+    });
+    assert.equal(blockedOrigin.status, 403);
+    assert.deepEqual(await blockedOrigin.json(), { message: "ORIGIN_NOT_ALLOWED" });
 
     const valid = store.create(-100123, 88, 42, now);
     const query = { chat_id: valid.chatId, msg_id: valid.messageId, user_id: valid.userId, private_chat_id: valid.privateChatId, timestamp: valid.timestamp, nonce: valid.nonce, signature: valid.signature };

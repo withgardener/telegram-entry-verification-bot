@@ -89,6 +89,11 @@ test("configuration fails fast and enforces strong secrets and explicit HTTPS or
     NODE_ENV: "production"
   };
   assert.equal(loadConfig(base).publicBaseUrl.origin, "https://verify.example.com");
+  assert.deepEqual(loadConfig({ ...base, CORS_ALLOWED_ORIGINS: "https://preview.example.com, https://staging.example.com" }).corsAllowedOrigins, [
+    "https://verify.example.com", "https://preview.example.com", "https://staging.example.com"
+  ]);
+  assert.throws(() => loadConfig({ ...base, CORS_ALLOWED_ORIGINS: "*" }), /absolute URL|HTTPS origins/);
+  assert.throws(() => loadConfig({ ...base, CORS_ALLOWED_ORIGINS: "https://preview.example.com/path" }), /HTTPS origins/);
   assert.throws(() => loadConfig({ ...base, VERIFICATION_SECRET: "short" }), /32 bytes/);
   assert.throws(() => loadConfig({ ...base, PUBLIC_BASE_URL: "http://verify.example.com" }), /HTTPS/);
 });

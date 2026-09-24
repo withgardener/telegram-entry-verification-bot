@@ -31,6 +31,10 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_BACKEND_BASE_URL: https://api.example.test
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: 1x00000000000000000000AA
+      NEXT_PUBLIC_TELEGRAM_BOT_USERNAME: ExampleWatchdogBot
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -47,6 +51,10 @@ jobs:
       - run: npm test
         working-directory: frontend
       - run: npm run build
+        working-directory: frontend
+      - run: npm run smoke:pages
+        working-directory: frontend
+      - run: npm run build:server
         working-directory: frontend
       - run: npm run smoke
         working-directory: frontend

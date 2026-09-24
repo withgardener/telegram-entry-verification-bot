@@ -4,6 +4,7 @@ export interface AppConfig {
   botToken: string;
   botUsername: string;
   publicBaseUrl: URL;
+  corsAllowedOrigins: string[];
   verificationSecret: string;
   verificationTtlSeconds: number;
   turnstileSecretKey: string;
@@ -57,6 +58,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error("PUBLIC_BASE_URL must contain only the public origin, without credentials, path, query, or fragment");
   }
 
+  const corsAllowedOrigins = new Set([publicBaseUrl.origin]);
+  for (const configuredOrigin of (env.CORS_ALLOWED_ORIGINS ?? "").split(",").map((origin) => origin.trim()).filter(Boolean)) {
+    let parsedOrigin: URL;
+    try { parsedOrigin = new URL(configuredOrigin); }
+    catch { throw new Error("CORS_ALLOWED_ORIGINS must be a comma-separated list of HTTPS origins"); }
+    const localCorsHttp = nodeEnv !== "production" && parsedOrigin.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(parsedOrigin.hostname);
+    if ((parsedOrigin.protocol !== "https:" && !localCorsHttp) || parsedOrigin.username || parsedOrigin.password || parsedOrigin.search || parsedOrigin.hash || !["", "/"].includes(parsedOrigin.pathname)) {
+      throw new Error("CORS_ALLOWED_ORIGINS entries must be HTTPS origins without credentials, paths, queries, or fragments");
+    }
+    corsAllowedOrigins.add(parsedOrigin.origin);
+  }
+
   const verificationSecret = required(env, "VERIFICATION_SECRET", "TGWD_SECRET");
   if (Buffer.byteLength(verificationSecret, "utf8") < 32) throw new Error("VERIFICATION_SECRET must contain at least 32 bytes of random data");
 
@@ -64,6 +77,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     botToken,
     botUsername,
     publicBaseUrl: new URL(publicBaseUrl.origin),
+    corsAllowedOrigins: [...corsAllowedOrigins],
     verificationSecret,
     verificationTtlSeconds: positiveInteger(env.VERIFICATION_TTL ?? "180", "VERIFICATION_TTL", 60, 900),
     turnstileSecretKey: required(env, "TURNSTILE_SECRET_KEY", "TGWD_CFTS_API_KEY"),

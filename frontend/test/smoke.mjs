@@ -72,11 +72,11 @@ try {
   const base = await getReady();
   const page = await fetch(base);
   assert.equal(page.status, 200);
-  assert.match(await page.text(), /Entry verification/);
+  assert.match(await page.text(), /Preparing your secure verification/);
 
   const verificationPage = await fetch(`${base}/verify`);
   assert.equal(verificationPage.status, 200);
-  assert.match(await verificationPage.text(), /Entry verification/);
+  assert.match(await verificationPage.text(), /Preparing your secure verification/);
 
   const health = await fetch(`${base}/health`);
   assert.deepEqual(await health.json(), { status: "ok", service: "telegram-entry-verification-frontend" });

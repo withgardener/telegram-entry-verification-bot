@@ -109,6 +109,48 @@ export function createHttpApp(deps: HttpDependencies): Koa {
       ctx.body = { message: "SERVER_UNAVAILABLE" };
     }
   });
+  app.use(async (ctx, next) => {
+    const origin = ctx.get("origin");
+    if (origin) {
+      let normalizedOrigin: string;
+      try {
+        const parsed = new URL(origin);
+        if (parsed.username || parsed.password || parsed.search || parsed.hash || !["", "/"].includes(parsed.pathname)) {
+          ctx.status = 403;
+          ctx.body = { message: "ORIGIN_NOT_ALLOWED" };
+          return;
+        }
+        normalizedOrigin = parsed.origin;
+      } catch {
+        ctx.status = 403;
+        ctx.body = { message: "ORIGIN_NOT_ALLOWED" };
+        return;
+      }
+      if (!deps.config.corsAllowedOrigins.includes(normalizedOrigin)) {
+        ctx.status = 403;
+        ctx.body = { message: "ORIGIN_NOT_ALLOWED" };
+        return;
+      }
+      ctx.vary("Origin");
+      ctx.set("Access-Control-Allow-Origin", normalizedOrigin);
+    }
+
+    if (ctx.method === "OPTIONS") {
+      const requestedMethod = ctx.get("access-control-request-method").toUpperCase();
+      const requestedHeaders = ctx.get("access-control-request-headers").split(",").map((header) => header.trim().toLowerCase()).filter(Boolean);
+      if (!origin || requestedMethod !== "POST" || requestedHeaders.some((header) => header !== "content-type")) {
+        ctx.status = 403;
+        ctx.body = { message: "CORS_PREFLIGHT_REJECTED" };
+        return;
+      }
+      ctx.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+      ctx.set("Access-Control-Allow-Headers", "Content-Type");
+      ctx.set("Access-Control-Max-Age", "600");
+      ctx.status = 204;
+      return;
+    }
+    await next();
+  });
   app.use(jsonBody);
 
   router.get("/health", (ctx) => {
